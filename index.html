@@ -80,15 +80,6 @@
             user-select: text; 
         }
 
-        /* --- 新增：操作提示文字样式 --- */
-        .cmd-hint {
-            color: rgba(17, 25, 37, 0.3); /* 30% 不透明度 */
-            font-size: 12px;
-            margin-left: 6px;
-            pointer-events: none; /* 不响应鼠标 */
-            user-select: none; /* 无法选中 */
-        }
-
         /* 提示文本 (Placeholder) */
         #input-box:empty::before {
             content: "说点什么…";
@@ -158,7 +149,7 @@
             background-color: rgba(17, 25, 37, 0.05); /* #111925 的 5% */
             border-radius: 4px;
             opacity: 0;
-            transition: opacity 0s ease-in-out;
+            transition: opacity 0.1s ease-in-out;
         }
 
         .person-item.active .select-bg {
@@ -199,7 +190,7 @@
 
         /* 头像和姓名在 Command 模式下的位移 transition */
         .avatar-circle, .person-name {
-            transition: left 0s ease-in-out; 
+            transition: left 0.1s ease-in-out; 
         }
 
         /* Command 模式下，非第一项的头像右移 */
@@ -307,7 +298,7 @@
         <div id="list-container"></div>
         
         <!-- 底部提示 -->
-        <div class="menu-footer">按住 Command 可多选</div>
+        <div class="menu-footer">按住Command可多选</div>
     </div>    
 
     <script>
@@ -362,9 +353,6 @@
 
         // 多选状态 Set，存储已选中的 index
         let selectedIndices = new Set();
-        
-        // 记录单次选择行为状态
-        let isSingleSelection = false;
 
         // DOM 元素
         const bgContainer = document.getElementById('bg-container');
@@ -535,42 +523,12 @@
         function setupEvents() {
             inputBox.addEventListener('compositionstart', () => { isComposing = true; });
             inputBox.addEventListener('compositionend', (e) => { isComposing = false; checkInputTrigger(); });
-            
-            // 输入事件：只要有输入，就视为新的开始，重置状态并移除提示
-            inputBox.addEventListener('input', (e) => { 
-                removeCommandHint(); // 移除提示文字
-                if (!isComposing) checkInputTrigger(); 
-            });
+            inputBox.addEventListener('input', (e) => { if (!isComposing) checkInputTrigger(); });
             
             inputBox.addEventListener('keydown', (e) => {
                 if (e.key === 'Meta' || e.key === 'OS') {
                     isCommandPressed = true;
-                    
-                    let isOpeningAction = false;
-
-                    // 新增逻辑：如果检测到提示文字，说明处于等待继续多选的状态
-                    const hintEl = inputBox.querySelector('.cmd-hint');
-                    if (hintEl) {
-                        // 1. 激活“继续”动作（移除提示，插入@）
-                        triggerContinueMention();
-                        isOpeningAction = true;
-                    } else if (!isMenuVisible) {
-                        // 兜底：先尝试正常的触发逻辑（是否有 @ 前缀）
-                        const hasNormalTrigger = checkInputTrigger(); 
-                        
-                        if (hasNormalTrigger) {
-                            isOpeningAction = true;
-                        } else if (closedByCommandMode) {
-                            // 如果没有正常触发，且是因为 Command 模式关闭的（作为后备判断）
-                            openFullMenuAtCaret();
-                            isOpeningAction = true;
-                        }
-                    }
-
-                    // 优化：只有在非呼起菜单的操作时，才响应 Command 按下的交互（如切换复选框显示）
-                    if (!isOpeningAction) {
-                        handleCommandPress();
-                    }
+                    handleCommandPress();
                     return;
                 }
 
@@ -605,97 +563,14 @@
                 }
             });
 
-            inputBox.addEventListener('mouseup', () => { 
-                // 点击事件同样检查是否命中提示模式
-                const hintEl = inputBox.querySelector('.cmd-hint');
-                if (hintEl) {
-                    triggerContinueMention();
-                } else {
-                    checkInputTrigger(); 
-                }
-            });
+            inputBox.addEventListener('mouseup', () => { checkInputTrigger(); });
         }
 
-        // 核心新逻辑：激活“继续”动作
-        function triggerContinueMention() {
-            const hintEl = inputBox.querySelector('.cmd-hint');
-            const selection = window.getSelection();
-            
-            if (hintEl && hintEl.parentNode) {
-                // 1. 创建 @ 节点
-                const atNode = document.createTextNode('@');
-                
-                // 2. 直接替换提示元素，保证位置准确
-                hintEl.parentNode.replaceChild(atNode, hintEl);
-                
-                // 3. 将光标定位到 @ 文本节点内部的末尾
-                // 这确保了 checkInputTrigger 能正确识别 TextNode
-                const range = document.createRange();
-                range.setStart(atNode, 1); 
-                range.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(range);
-            } else {
-                // 兜底：如果没有提示元素（比如点击时已经意外消失），按普通逻辑插入
-                if (!selection.rangeCount) return;
-                const range = selection.getRangeAt(0);
-                const atNode = document.createTextNode('@');
-                range.insertNode(atNode);
-                range.setStart(atNode, 1);
-                range.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(range);
-            }
-            
-            // 4. 触发搜索/打开菜单
-            checkInputTrigger();
-            
-            // 5. 重置状态
-            isTriggerConsumed = false;
-            hasSelectedWithCommand = false;
-            selectedIndices.clear();
-            listContainer.scrollTop = 0;
-            updateActiveIndex(0, false);
-            isSingleSelection = false;
-        }
-
-        // 插入操作提示文字
-        function insertCommandHint() {
-            // 防止重复插入
-            if (inputBox.querySelector('.cmd-hint')) return;
+        function checkInputTrigger() {
+            if (isCommandPressed && hasSelectedWithCommand) return;
 
             const selection = window.getSelection();
             if (!selection.rangeCount) return;
-            const range = selection.getRangeAt(0);
-
-            const hintSpan = document.createElement('span');
-            hintSpan.className = 'cmd-hint';
-            hintSpan.textContent = '按 Command 继续@'; // 文案更新
-            hintSpan.contentEditable = "false"; // 设为不可编辑
-
-            range.insertNode(hintSpan);
-            
-            // 将光标移到提示文字前面（或保持原位）
-            range.setStartBefore(hintSpan);
-            range.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(range);
-        }
-
-        // 移除操作提示文字
-        function removeCommandHint() {
-            const hint = inputBox.querySelector('.cmd-hint');
-            if (hint) {
-                hint.remove();
-            }
-        }
-
-        // 修改 checkInputTrigger 以返回是否触发成功
-        function checkInputTrigger() {
-            if (isCommandPressed && hasSelectedWithCommand) return true;
-
-            const selection = window.getSelection();
-            if (!selection.rangeCount) return false;
             
             const range = selection.getRangeAt(0);
             const textNode = range.startContainer;
@@ -708,18 +583,15 @@
 
                 if (lastAtIndex !== -1) {
                     const searchQuery = textBeforeCaret.slice(lastAtIndex + 1);
-                    if (searchQuery.includes('\n')) { hideMenu(); return false; }
+                    if (searchQuery.includes('\n')) { hideMenu(); return; }
                     
                     const hasMatches = filterAndShowMenu(searchQuery, lastAtIndex, textNode);
                     if (!hasMatches) hideMenu();
-                    return hasMatches;
                 } else {
                     if (!isCommandPressed) hideMenu();
-                    return false;
                 }
             } else {
                 hideMenu();
-                return false;
             }
         }
 
@@ -770,7 +642,6 @@
                 selectedIndices.clear(); 
                 listContainer.scrollTop = 0; // 强制回到顶部
                 updateActiveIndex(0, false); // 强制选中第一项，且不滚动
-                isSingleSelection = false; // 重置
             }
 
             // 确保 activeIndex 在可见列表内（如果上面没有重置成0，这里会兜底）
@@ -780,8 +651,8 @@
             return true;
         }
 
-        function showMenuAtCaret(rangeOrFakeRange) {
-            const rect = rangeOrFakeRange.getBoundingClientRect();
+        function showMenuAtCaret(range) {
+            const rect = range.getBoundingClientRect();
             const bottom = window.innerHeight - rect.top + 30;
             const left = rect.left;
 
@@ -798,25 +669,15 @@
         function hideMenu() {
             isMenuVisible = false;
             mentionMenu.classList.remove('visible');
-            
-            // --- 核心修改：检查是否需要显示提示 ---
-            // 触发条件：单选操作成功 OR (Command模式且当前有选中项)
-            if (isSingleSelection || (hasSelectedWithCommand && selectedIndices.size > 0)) {
-                insertCommandHint();
-            }
-
-            // 重置所有状态
             hasSelectedWithCommand = false;
             isCommandPressed = false; 
             isTriggerConsumed = false;
             visibleIndices = peopleData.map((_, i) => i);
             
-            // 只要关闭菜单，就重置复选框状态
+            // 只要关闭菜单，就重置所有状态
             selectedIndices.clear();
             listContainer.scrollTop = 0; // 重置滚动
             activeIndex = 0; // 重置选中项
-            
-            isSingleSelection = false; // 重置单选标记
 
             // 移除 Command 模式状态
             listContainer.classList.remove('command-mode');
@@ -844,9 +705,7 @@
             listContainer.classList.remove('command-mode');
             
             updateVisualState();
-            
             if (hasSelectedWithCommand) {
-                // 这里只负责关闭，hint 的插入逻辑移到了 hideMenu 中统一处理
                 hideMenu();
             }
         }
@@ -912,8 +771,6 @@
             insertMentions(namesToInsert);
 
             if (!isCommandPressed) {
-                // 标记为单选成功，通知 hideMenu 显示 Hint
-                isSingleSelection = true;
                 hideMenu();
             } 
         }
